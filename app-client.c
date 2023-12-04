@@ -36,10 +36,6 @@ int main() {
     send(sock, message, strlen(message), 0);
     printf("Message sent \n");
 
-    int valueRead = read(sock, buffer, 1024);
-
-    printf("Received from server: %s\n", buffer);
-
     close(sock);
 
     return 0;

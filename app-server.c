@@ -18,7 +18,7 @@ void sigHupHandler(int sigNumber) {
 
 int main() {
     int serverFD;
-    int incomingSocketFD; 
+    int incomingSocketFD = 0; 
     struct sockaddr_in socketAddress; 
     int addressLength = sizeof(socketAddress);
     fd_set readfds;
@@ -26,7 +26,8 @@ int main() {
     sigset_t blockedMask, origMask;
     char buffer[1024] = { 0 };
     int readBytes;
-    int connectionsCount = 0;
+    int maxSd;
+    int signalOrConnectionCount = 0;
 
     // Socket creating
     if ((serverFD = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
@@ -67,10 +68,12 @@ int main() {
 
     // Setting up file descriptors
     FD_ZERO(&readfds);
-    FD_SET(serverFD, &readfds);
+    maxSd = serverFD;
+    
+    while (signalOrConnectionCount < 3) {
+        FD_SET(serverFD, &readfds);
 
-    while (connectionsCount < 3) {
-        if (pselect(serverFD + 1, &readfds, NULL, NULL, NULL, &origMask) < 0 && errno != EINTR) {
+        if (pselect(maxSd + 1, &readfds, NULL, NULL, NULL, &origMask) < 0 && errno != EINTR) {
             perror("pselect error");
             exit(EXIT_FAILURE);
         }
@@ -79,7 +82,22 @@ int main() {
         if (sighupReceived) {
             printf("SIGHUP received.\n");
             sighupReceived = 0;
-            connectionsCount++;
+            signalOrConnectionCount++;
+            continue;
+        }
+    
+        // Reading incoming bytes
+        if (FD_ISSET(incomingSocketFD, &readfds)) {
+            if ((readBytes = read(incomingSocketFD, buffer, 1024)) < 0) {
+                perror("read error");
+                exit(EXIT_FAILURE);
+            }
+
+            printf("Received data: %d bytes\n", readBytes);
+            maxSd = serverFD;
+            close(incomingSocketFD);
+            signalOrConnectionCount++;
+            continue;
         }
 
         // Check of incoming connections
@@ -90,16 +108,11 @@ int main() {
             }
 
             printf("New connection.\n");
-
-            readBytes = read(incomingSocketFD, buffer, 1024);
-            printf("Received data: %d bytes\n", readBytes);
-
-            char* response = "Server got data";
-            send(incomingSocketFD, response, strlen(response), 0);
-
-            connectionsCount++;
-
-            close(incomingSocketFD);
+            
+            FD_SET(incomingSocketFD, &readfds);
+            if (incomingSocketFD > maxSd) {
+            	maxSd = incomingSocketFD;
+            }
         }
     }
 
