@@ -65,17 +65,20 @@ int main() {
     sigemptyset(&origMask);
     sigaddset(&blockedMask, SIGHUP);
     sigprocmask(SIG_BLOCK, &blockedMask, &origMask);
-
-    // Setting up file descriptors
-    FD_ZERO(&readfds);
-    maxSd = serverFD;
-    
+   
     while (signalOrConnectionCount < 3) {
-        FD_SET(serverFD, &readfds);
-
-        if (pselect(maxSd + 1, &readfds, NULL, NULL, NULL, &origMask) < 0 && errno != EINTR) {
-            perror("pselect error");
-            exit(EXIT_FAILURE);
+        FD_ZERO(&readfds); 
+        FD_SET(serverFD, &readfds); 
+        
+        if (incomingSocketFD > 0) { 
+            FD_SET(incomingSocketFD, &readfds); 
+        } 
+        
+        maxSd = (incomingSocketFD > serverFD) ? incomingSocketFD : serverFD; 
+ 
+        if (pselect(maxSd + 1, &readfds, NULL, NULL, NULL, &origMask) < 0 && errno != EINTR) { 
+            perror("pselect error"); 
+            exit(EXIT_FAILURE); 
         }
 
         // Receiving SIGHUP signal check
@@ -87,19 +90,23 @@ int main() {
         }
     
         // Reading incoming bytes
-        if (FD_ISSET(incomingSocketFD, &readfds)) {
-            if ((readBytes = read(incomingSocketFD, buffer, 1024)) < 0) {
-                perror("read error");
-                exit(EXIT_FAILURE);
-            }
+        if (incomingSocketFD > 0 && FD_ISSET(incomingSocketFD, &readfds)) { 
+            readBytes = read(incomingSocketFD, buffer, 1024);
 
-            printf("Received data: %d bytes\n", readBytes);
-            maxSd = serverFD;
-            close(incomingSocketFD);
-            signalOrConnectionCount++;
+            if (readBytes > 0) { 
+                printf("Received data: %d bytes\n", readBytes); 
+            } else {
+                if (readBytes == 0) {
+                    close(incomingSocketFD); 
+                    incomingSocketFD = 0; 
+                } else { 
+                    perror("read error"); 
+                } 
+                signalOrConnectionCount++;   
+            } 
             continue;
         }
-
+        
         // Check of incoming connections
         if (FD_ISSET(serverFD, &readfds)) {
             if ((incomingSocketFD = accept(serverFD, (struct sockaddr*)&socketAddress, (socklen_t*)&addressLength)) < 0) {
@@ -108,11 +115,6 @@ int main() {
             }
 
             printf("New connection.\n");
-            
-            FD_SET(incomingSocketFD, &readfds);
-            if (incomingSocketFD > maxSd) {
-            	maxSd = incomingSocketFD;
-            }
         }
     }
 
